@@ -9,7 +9,7 @@ module.exports = (sequelize, DataTypes) => {
     correct: DataTypes.STRING,
     quizName: DataTypes.STRING,
     questionnum: DataTypes.INTEGER,
-    assignedTo: DataTypes.STRING
+    assignedTo: DataTypes.INTEGER
   }, {});
   Quiz.associate = function(models) {
     Quiz.hasMany(models.completedquizes, {foreignKey: "quizId"})

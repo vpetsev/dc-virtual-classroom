@@ -1,16 +1,11 @@
-function checkAuthorization(req, res, next) {
-
-    if (req.session) {
-        if (req.session.user) {
-            res.locals.isAuthenticated = true
-            let user = req.session.user
-            next()
-        } else {
-            res.redirect("/login")
-        }
-    } else {
-        res.redirect("/login")
-    }
-}
-
-module.exports = checkAuthorization
+const models = require('../models');
+const asyncHandler = require('./asyncHandler');
+module.exports = asyncHandler(async (req, res, next) => {
+  const id = req.session && req.session.user && req.session.user.userId;
+  if (!Number.isSafeInteger(id)) return res.redirect('/login');
+  const user = await models.User.findByPk(id);
+  if (!user) return res.redirect('/login');
+  req.user = user;
+  res.locals.isAuthenticated = true;
+  next();
+});
