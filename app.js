@@ -1,64 +1,40 @@
-const express = require('express')
-const app = express()
-const mustacheExpress = require('mustache-express')
-const bodyParser = require("body-parser")
-const path = require('path')
-const session = require("express-session")
-const indexRoutes = require("./routes/index")
-const instructorRoutes = require("./routes/instructor")
-const studentRoutes = require("./routes/student")
-const checkAuthorization = require("./middleware/authorization")
-const PORT = process.env.PORT || 3003
-
+const express = require('express');
+const app = express();
+const mustacheExpress = require('mustache-express');
+const path = require('path');
+const session = require('express-session');
+const checkAuthorization = require('./middleware/authorization');
+const requireRole = require('./middleware/role');
+const secret = process.env.SESSION_SECRET;
+if (process.env.NODE_ENV === 'production' && !secret) throw new Error('SESSION_SECRET must be configured');
 app.use(session({
-    secret: 'pineapple_octo',
-    resave: true,
-    saveUninitialized: false
-}))
-
-const VIEWS_PATH = path.join(__dirname, '/views')
-global.__basedir = __dirname
-
-app.use(express.urlencoded())
-
-app.use(bodyParser.urlencoded({ extended: false }))
-
+  secret: secret || require('crypto').randomBytes(32).toString('hex'),
+  resave: false, saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: 'lax' },
+}));
+const VIEWS_PATH = path.join(__dirname, 'views');
+global.__basedir = __dirname;
+app.use(express.urlencoded({ extended: false }));
 app.use((req, res, next) => {
-    res.locals.isAuthenticated = false
-    next()
-})
-
-app.use('/assets', express.static('assets'))
-
-function checkIfAdmin(req, res, next) {
-    if (req.session.userType == "admin") {
-        next()
-    } else {
-        res.redirect("/")
-    }
+  res.locals.isAuthenticated = Boolean(req.session && req.session.user);
+  next();
+});
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
+app.use('/', require('./routes/index'));
+app.use('/student', checkAuthorization, requireRole('student'), require('./routes/student'));
+app.use('/instructor', checkAuthorization, requireRole('admin'), require('./routes/instructor'));
+app.engine('mustache', mustacheExpress(path.join(VIEWS_PATH, 'partials'), '.mustache'));
+app.set('views', VIEWS_PATH);
+app.set('view engine', 'mustache');
+app.get('/signout', (req, res, next) => {
+  req.session.destroy(error => error ? next(error) : res.redirect('/'));
+});
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  res.status(500).send('Unable to complete the request.');
+});
+if (require.main === module) {
+  const port = process.env.PORT || 3003;
+  app.listen(port, () => console.log('Server running on port ' + port));
 }
-
-function checkIfStudent(req, res, next) {
-    if (req.session.userType == "student") {
-        next()
-    } else {
-        res.redirect("/")
-    }
-}
-
-app.use("/", indexRoutes)
-app.use("/student", checkAuthorization, checkIfStudent, studentRoutes)
-app.use("/instructor", checkAuthorization, checkIfAdmin, instructorRoutes)
-
-app.engine('mustache', mustacheExpress(VIEWS_PATH + '/partials', '.mustache'))
-app.set("views", VIEWS_PATH)
-app.set("view engine", "mustache")
-
-app.get("/signout", (req, res) => {
-    req.session.destroy();
-    res.redirect("/");
-})
-
-app.listen(PORT, () => {
-    console.log("Server is running on http://localhost:3003")
-})
+module.exports = app;

@@ -1,165 +1,76 @@
-const express = require("express")
-const router = express.Router()
-const models = require("../models")
+const router = require('express').Router();
+const models = require('../models');
+const asyncHandler = require('../middleware/asyncHandler');
+const { normalizeAnswer } = require('../lib/quizAnswers');
 
-router.get("/instructor-dash", async (req, res) => {
-    const quiz = await models.Quiz.findAll()
-    const quizValues = quiz.map((ele) => ele.dataValues)
-    res.render("instructor/instructor-dash", { quizzes: quizValues })
-})
+router.get('/instructor-dash', asyncHandler(async (req, res) => {
+  const quizzes = await models.Quiz.findAll();
+  res.render('instructor/instructor-dash', { quizzes: quizzes.map(quiz => quiz.dataValues) });
+}));
+router.get('/instructor-quizzes', (req, res) => res.redirect('/instructor/instructor-dash'));
+for (const [route, view] of [
+  ['/instructor-quizzes/:id', 'instructor/instructor-quiz'],
+  ['/instructor-edit-quiz/:id', 'instructor/instructor-edit-quiz'],
+]) router.get(route, asyncHandler(async (req, res) => {
+  const quiz = await models.Quiz.findByPk(req.params.id);
+  if (!quiz) return res.status(404).send('Quiz not found.');
+  res.render(view, quiz.dataValues);
+}));
 
-router.get("/instructor-quizzes/:id", async (req, res) => {
-    const quizId = req.params.id
-    const quiz = await models.Quiz.findOne({
-        where: {
-            id: quizId
-        }
-    })
-    res.render("instructor/instructor-quiz", quiz.dataValues)
-})
-
-// EDIT quiz functionality
-router.get("/instructor-edit-quiz/:id", async (req, res) => {
-    const quizId = req.params.id
-    const quiz = await models.Quiz.findOne({
-        where: {
-            id: quizId
-        }
-    })
-
-    res.render("instructor/instructor-edit-quiz", quiz.dataValues)
-})
-
-router.post("/update-quiz-answer/:id", async (req, res) => {
-    const quizId = req.params.id
-    const correctAnswer = req.body.correctAnswer
-    
-    await models.Quiz.update({
-        correct: correctAnswer
-    }, {
-        where: {
-            id: quizId
-        }
-    })
-
-    res.redirect(`/instructor/instructor-edit-quiz/${quizId}`)
-})
-
-router.post("/update-title-name/:id", async (req, res) => {
-    const quizId = req.params.id
-    const quizName = req.body.quizName
-    await models.Quiz.update({
-        question: quizName
-    }, {
-        where: {
-            id: quizId
-        }
-    })
-
-    res.redirect(`/instructor/instructor-edit-quiz/${quizId}`)
-})
-
-// Create Quiz
-router.get("/instructor-create-quiz", async (req, res) => {
-    const myUsers = await models.User.findAll({
-        where: {
-            userType: "student"
-        }
-    })
-    const userIds = myUsers.map((ele) => ele.dataValues.username)
-    console.log(userIds)
-
-    res.render("instructor/instructor-create-quiz", { users: myUsers })
-})
-
-router.post("/instructor-create-quiz", async (req, res) => {
-    const quizTitle = req.body.quizTitle
-    const questionField = req.body.questionField
-    const choiceA = req.body.choiceA
-    const choiceB = req.body.choiceB
-    const choiceC = req.body.choiceC
-    const choiceD = req.body.choiceD
-    const correctAnswer = req.body.correctAnswer
-    const question = req.body.questionField
-    const emailAdd = req.body.emailAdd
-
-    console.log(emailAdd)
-
-    console.log(typeof (emailAdd))
-
-    let userObject
-    // const quizValues = quiz.map((ele) => ele.dataValues)
-    
-    if (typeof (emailAdd) == "object") {
-        console.log("multiple users")
-        // parse emailadd array 
-        console.log(emailAdd[1])
-        for (let i = 0; i < emailAdd.length; i++) {
-            models.User.findAll({
-                where: {
-                    username: emailAdd
-                }
-            }).then((response) => {
-                console.log(response[0].dataValues)
-                userObject.push(response[0].dataValues)
-            })
-        }
-        console.log(userObject)
-
-    } else {
-        console.log("not multiple")
-        userObject = await models.User.findOne({
-            where: {
-                username: emailAdd
-            }
-        })
-    }
-
-    console.log(userObject.dataValues)
-
-    const userId = userObject.dataValues.id
-
-    const quiz = models.Quiz.build({
-        choice1: choiceA,
-        choice2: choiceB,
-        choice3: choiceC,
-        choice4: choiceD,
-        correct: correctAnswer,
-        question: questionField,
-        quizName: quizTitle,
-        question: question,
-        assignedTo: userId
-    })
-
-    // models.Quiz.increment('questionNum', { where: { questionNum: null}})
-
-    const persistedQuiz = await quiz.save()
-
-    if (persistedQuiz != null) {
-        res.redirect('/instructor/instructor-quizzes')
-    } else {
-        res.render('/instructor/instructor-create-quiz', { message: 'Unable to add quiz' })
-    }
-})
-
-router.get("/instructor-delete-quiz/:id", async (req, res) => {
-    let quizId = req.params.id
-
-    await models.completedquizes.update({
-        quizId: null
-    }, {
-        where: {
-            quizId: quizId
-        }
-    }).then(() => {
-        models.Quiz.destroy({
-            where: {
-                id: quizId
-            }
-        })
-    })
-
-    res.redirect("/instructor/instructor-dash")
-})
-
-module.exports = router
+router.post('/update-quiz-answer/:id', asyncHandler(async (req, res) => {
+  const quiz = await models.Quiz.findByPk(req.params.id);
+  if (!quiz) return res.status(404).send('Quiz not found.');
+  const correct = normalizeAnswer(req.body.correctAnswer, [quiz.choice1, quiz.choice2, quiz.choice3, quiz.choice4]);
+  if (correct === null) return res.status(400).send('Choose a valid correct answer.');
+  await quiz.update({ correct });
+  res.redirect('/instructor/instructor-edit-quiz/' + quiz.id);
+}));
+router.post('/update-title-name/:id', asyncHandler(async (req, res) => {
+  const quiz = await models.Quiz.findByPk(req.params.id);
+  if (!quiz) return res.status(404).send('Quiz not found.');
+  if (typeof req.body.quizName !== 'string' || !req.body.quizName.trim()) {
+    return res.status(400).send('A quiz title is required.');
+  }
+  await quiz.update({ quizName: req.body.quizName });
+  res.redirect('/instructor/instructor-edit-quiz/' + quiz.id);
+}));
+router.get('/instructor-create-quiz', asyncHandler(async (req, res) => {
+  const users = await models.User.findAll({ where: { userType: 'student' } });
+  res.render('instructor/instructor-create-quiz', { users });
+}));
+router.post('/instructor-create-quiz', asyncHandler(async (req, res) => {
+  const body = req.body;
+  const choices = [body.choiceA, body.choiceB, body.choiceC, body.choiceD];
+  const required = [body.quizTitle, body.questionField, ...choices];
+  if (required.some(value => typeof value !== 'string' || !value.trim())) {
+    return res.status(400).send('A title, question and four choices are required.');
+  }
+  const correct = normalizeAnswer(body.correctAnswer, choices);
+  if (correct === null) return res.status(400).send('Choose a valid correct answer.');
+  const emails = [...new Set(Array.isArray(body.emailAdd) ? body.emailAdd : [body.emailAdd])];
+  if (!emails.length || emails.some(email => typeof email !== 'string' || !email.trim())) {
+    return res.status(400).send('Select at least one student.');
+  }
+  const created = await models.sequelize.transaction(async transaction => {
+    const students = await models.User.findAll({
+      where: { username: emails, userType: 'student' }, transaction,
+    });
+    if (students.length !== emails.length) return false;
+    await models.Quiz.bulkCreate(students.map(student => ({
+      quizName: body.quizTitle, question: body.questionField,
+      choice1: choices[0], choice2: choices[1], choice3: choices[2], choice4: choices[3],
+      correct, assignedTo: student.id,
+    })), { transaction });
+    return true;
+  });
+  if (!created) return res.status(400).send('One or more selected students do not exist.');
+  res.redirect('/instructor/instructor-dash');
+}));
+router.get('/instructor-delete-quiz/:id', asyncHandler(async (req, res) => {
+  await models.sequelize.transaction(async transaction => {
+    await models.completedquizes.update({ quizId: null }, { where: { quizId: req.params.id }, transaction });
+    await models.Quiz.destroy({ where: { id: req.params.id }, transaction });
+  });
+  res.redirect('/instructor/instructor-dash');
+}));
+module.exports = router;

@@ -1,71 +1,35 @@
-const express = require("express")
-const router = express.Router()
-const models = require("../models")
+const router = require('express').Router();
+const models = require('../models');
+const asyncHandler = require('../middleware/asyncHandler');
+const { correctAnswer } = require('../lib/quizAnswers');
 
-router.get("/student-dashboard/", async (req, res) => {
-    const currentStudentSession = req.session.user
-    console.log(currentStudentSession)
-    const currentStudentId = currentStudentSession.userId 
-    console.log(currentStudentId)
+router.get('/student-dashboard/', asyncHandler(async (req, res) => {
+  const quizzes = await models.Quiz.findAll({ where: { assignedTo: req.user.id } });
+  res.render('student/student-dashboard', { quizzes: quizzes.map(quiz => quiz.dataValues) });
+}));
+router.get('/student-quiz-result', (req, res) => res.render('student/student-quiz-result'));
 
-    // Quizzes are not loading. Something to do with FindAll vs. FindOne. Findall works when there's more than 1 quiz assigned to the same student.
-    const studentQuizzes = await models.Quiz.findAll({
-        where: {
-            assignedTo: currentStudentId
-        }
-    })
-    console.log(studentQuizzes)
-    const quizValues = studentQuizzes.map((ele) => ele.dataValues)
-    console.log(quizValues)
-    res.render("student/student-dashboard", { quizzes: quizValues })
-})
-
-router.get("/student-quiz-result", (req, res) => {
-    res.render("student/student-quiz-result")
-})
-
-router.get("/student-take-quiz/:id", async (req, res) => {
-    const quizId = req.params.id
-
-    const quiz = await models.Quiz.findOne({
-        where: {
-            id: quizId
-        }
-    })
-
-    res.render("student/student-take-quiz", quiz.dataValues)
-})
-
-router.post("/student-take-quiz/:id", async (req, res) => {
-    const quizId = req.params.id
-    const currentStudentSession = req.session.user
-    const currentStudentId = currentStudentSession.userId 
-    const studentAnswer = req.body.choice
-
-    const quiz = await models.Quiz.findOne({
-        where: {
-            id: quizId
-        }
-    })
-
-    const quizValues = quiz.dataValues
-    let isCorrect = 1
-    
-    if (quizValues.correctAnswer != studentAnswer) {
-        isCorrect = 0
-    }
-
-    models.completedquizes.create({
-        studentId: currentStudentId,
-        quizId: quizId,
-        studentAnswer: studentAnswer,
-        isCorrect: isCorrect
-    }).then((response) => {
-        console.log(response)
-    })
-
-    res.redirect("/student/student-quiz-result")
-})
-
-
-module.exports = router
+async function assignedQuiz(req) {
+  if (!/^[1-9][0-9]*$/.test(req.params.id)) return null;
+  return models.Quiz.findOne({ where: { id: req.params.id, assignedTo: req.user.id } });
+}
+router.get('/student-take-quiz/:id', asyncHandler(async (req, res) => {
+  const quiz = await assignedQuiz(req);
+  if (!quiz) return res.status(404).send('Quiz not found.');
+  const { correct, ...view } = quiz.dataValues;
+  res.render('student/student-take-quiz', view);
+}));
+router.post('/student-take-quiz/:id', asyncHandler(async (req, res) => {
+  const quiz = await assignedQuiz(req);
+  if (!quiz) return res.status(404).send('Quiz not found.');
+  const answer = req.body.choice;
+  if (typeof answer !== 'string' || ![quiz.choice1, quiz.choice2, quiz.choice3, quiz.choice4].includes(answer)) {
+    return res.status(400).send('Choose one of the available answers.');
+  }
+  await models.completedquizes.create({
+    studentId: req.user.id, quizId: quiz.id, studentAnswer: answer,
+    isCorrect: correctAnswer(quiz) === answer,
+  });
+  res.redirect('/student/student-quiz-result');
+}));
+module.exports = router;
